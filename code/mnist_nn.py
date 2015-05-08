@@ -1,15 +1,12 @@
-
 import theano
 import cPickle
 import gzip
 import os
-import sys
 import time
 
 import theano.tensor as T
 import numpy as np
 from theano import config
-# from theano import *
 
 config.mode='FAST_COMPILE'
 
@@ -36,9 +33,9 @@ def dropout(X, p=0.0, rng=np.random.RandomState(1234)):
   srng = theano.tensor.shared_randomstreams.RandomStreams(rng.randint(999999))
 
   if p > 0:
-    retain_prob = 1 - p # 1 - p because p = prob of dropping
-    X *= srng.binomial(X.shape, p=retain_prob, dtype=theano.config.floatX)
-    X /= retain_prob
+    p = 1 - p # 1 - p because p = prob of dropping
+    X *= srng.binomial(X.shape, p=p, dtype=theano.config.floatX)
+    X /= p
   return X
 
 def model(X, w_h, b_h, w_h2, b_h2, w_soft, b_soft, p_drop_input, p_drop_hidden, rng):
@@ -134,6 +131,7 @@ def main(lr=0.05, batch_size=100, n_epochs=1000, dataset='mnist.pkl.gz'):
   b_h2 = init_weights((100,))
   w_soft = init_weights((100, 10))
   b_soft = init_weights((10,))
+
   # todo: add biases b_h, b_h2, b_soft
 
   # model with dropout of 0.2 in input units and 0.5 in hidden units
