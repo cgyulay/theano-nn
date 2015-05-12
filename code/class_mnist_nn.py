@@ -100,7 +100,7 @@ class SoftmaxLayer():
 
 class NN():
 
-  def __init__(self, lr=0.1, batch_size=100, n_hidden=200, n_epochs=100, dataset='mnist.pkl.gz'):
+  def __init__(self, lr=0.1, batch_size=100, n_hidden=200, n_epochs=100, dataset='mnist.pkl.gz', regularization='dropout'):
     self.lr = lr
     self.batch_size = batch_size
     self.n_epochs = n_epochs
@@ -157,7 +157,7 @@ class NN():
     params = [self.layers[i].params for i in xrange(len(self.layers))]
     self.params = [param for subparams in params for param in subparams]
 
-    dropped_py_x = self.softmax.output_no_dropout
+    dropped_py_x = self.softmax.output
     py_x = self.softmax.output_no_dropout
     y_pred = self.softmax.y_pred
     accuracy = T.mean(T.eq(y_pred, y))
@@ -231,8 +231,8 @@ def load_data(dataset):
   train_set, valid_set, test_set = cPickle.load(f)
   f.close()
   # train_set, valid_set, test_set format: tuple(input, target)
-  # input is a 2d (matrix) numpy.ndarray whose rows correspond to an example
-  # target is a 1d (vector) numpy.ndarray that has the same length as the number of rows in the input
+  # input is a 2d (matrix) np.ndarray whose rows correspond to an example
+  # target is a 1d (vector) np.ndarray that has the same length as the number of rows in the input
 
   def shared_dataset(data_xy, borrow=True):
     # store dataset in theano shared variables to utilize gpu
