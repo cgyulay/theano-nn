@@ -11,66 +11,96 @@ from theano import config
 config.mode='FAST_COMPILE'
 
 
+# Activations
+
+def linear(x):
+  return x
+
+def sigmoid(x):
+  # T.nnet.sigmoid
+  return 1.0 / (1.0 + T.exp(-x))
+
+def tanh(x):
+  return (T.exp(x) - T.exp(-x)) / (T.exp(x) + T.exp(-x))
+
+def relu(x):
+  return T.maximum(x, 0.0)
+
+def relu_leaky(x, alpha=3.0):
+  return T.maximum(x, x * (1.0 / alpha))
+
+
+# Costs
+
+def ce_multiclass(py_x, y):
+  # Locations 1,2,3,...,n by y
+  # T.nnet.categorical_crossentropy
+  return -T.mean(T.log(py_x)[T.arange(y.shape[0]), y])
+
+def ce_binary(py_x, y):
+  # T.nnet.binary_crossentropy
+  return T.mean(T.nnet.binary_crossentropy(py_x, y))
+
+def mean_squared_error(pred, y):
+  return T.mean((pred - y) ** 2)
+
+
 # Network
 
 class ConnectedLayer():
 
-  def __init__(self, input, n_in, n_out, rng, activation='relu', p_dropout=0.0, w=None, b=None):
+  def __init__(self, input, n_in, n_out, rng, activation=relu, p_dropout=0.0, w=None, b=None, input_no_dropout=None):
     self.input = input
+    self.input_no_dropout = input_no_dropout
     self.n_in = n_in
     self.n_out = n_out
     self.activation = activation
     self.p_dropout = p_dropout
 
-    if w is None:
+    if w == None:
       w = init_weights((n_in, n_out))
 
-    if b is None:
+    if b == None:
       b = init_weights((n_out,))
 
     self.w = w
     self.b = b
 
-    self.output_no_dropout = activation(T.dot(input, self.w) + self.b)
+    self.output_no_dropout = activation(T.dot(input_no_dropout, self.w) + self.b)
 
-    if p_dropout > 0:
-      input = dropout(input, p_dropout, rng)
-
-    self.output = activation(T.dot(input, self.w) + self.b)
+    self.output = activation(T.dot(dropout(self.input, p_dropout, rng), self.w) + self.b)
+    self.output_no_dropout = activation(T.dot(self.input, self.w) + self.b)
     self.params = [self.w, self.b]
 
 
-class LogisticRegressionLayer():
+class SoftmaxLayer():
 
-  def __init__(self, input, n_in, n_out, rng, activation='softmax', p_dropout=0.0, w=None, b=None):
+  def __init__(self, input, n_in, n_out, rng, p_dropout=0.0, w=None, b=None, input_no_dropout=None):
     self.input = input
+    self.input_no_dropout = input_no_dropout
     self.n_in = n_in
     self.n_out = n_out
-    self.activation = activation
     self.p_dropout = p_dropout
 
-    if w is None:
+    if w == None:
       w = init_weights((n_in, n_out))
 
-    if b is None:
+    if b == None:
       b = init_weights((n_out,))
 
     self.w = w
     self.b = b
 
-    self.output_no_dropout = activation(T.dot(input, self.w) + self.b)
-
-    if p_dropout > 0:
-      input = dropout(input, p_dropout, rng)
-
-    self.output = activation(T.dot(input, self.w) + self.b)
+    # self.output = a if uses_dropout else b
+    self.output = softmax(T.dot(dropout(self.input, p_dropout, rng), self.w) + self.b)
+    self.output_no_dropout = softmax(T.dot(self.input, self.w) + self.b)
     self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
 
 
 class NN():
 
-  def __init__(self, lr=0.05, batch_size=100, n_hidden=100, n_epochs=500, dataset='mnist.pkl.gz'):
+  def __init__(self, lr=0.1, batch_size=100, n_hidden=200, n_epochs=100, dataset='mnist.pkl.gz'):
     self.lr = lr
     self.batch_size = batch_size
     self.n_epochs = n_epochs
@@ -82,24 +112,30 @@ class NN():
     valid_set_x, valid_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
 
+    classes = set()
+    for item in train_set_y.eval():
+      classes.add(item)
+    n_output_classes = len(classes)
+
     print('Building the model...')
 
-    index = T.lscalar()
     x = T.matrix('x')
     y = T.ivector('y')
     rng = np.random.RandomState(1234)
 
     self.h1 = ConnectedLayer(
       input=x,
+      input_no_dropout=x,
       n_in=28 * 28,
       n_out=n_hidden,
       rng=rng,
       activation=relu,
-      p_dropout=0.5
+      p_dropout=0.2
     )
 
     self.h2 = ConnectedLayer(
       input=self.h1.output,
+      input_no_dropout=self.h1.output_no_dropout,
       n_in=n_hidden,
       n_out=n_hidden,
       rng=rng,
@@ -107,26 +143,31 @@ class NN():
       p_dropout=0.5
     )
 
-    self.softmax = LogisticRegressionLayer(
+    self.softmax = SoftmaxLayer(
       input=self.h2.output,
+      input_no_dropout=self.h2.output_no_dropout,
       n_in=n_hidden,
-      n_out=10,
+      n_out=n_output_classes,
       rng=rng,
-      activation=softmax,
       p_dropout=0.5
     ) # softmax.output = py_x
 
-    self.params = self.h1.params + self.h2.params + self.softmax.params
+    # It looks ridiculous but just flattens all layer params into one list
+    self.layers = [self.h1, self.h2, self.softmax]
+    params = [self.layers[i].params for i in xrange(len(self.layers))]
+    self.params = [param for subparams in params for param in subparams]
 
-    dropped_py_x = self.softmax.output
+    dropped_py_x = self.softmax.output_no_dropout
     py_x = self.softmax.output_no_dropout
     y_pred = self.softmax.y_pred
+    accuracy = T.mean(T.eq(y_pred, y))
 
     cost = ce_multiclass(dropped_py_x, y)
     updates = sgd(cost, self.params, self.lr)
 
     print('Compiling functions...')
 
+    index = T.lscalar()
     train = theano.function(
       inputs=[index],
       outputs=cost,
@@ -142,15 +183,27 @@ class NN():
       outputs=y_pred
     )
 
+    valid_accuracy = theano.function(
+      inputs=[index],
+      outputs=accuracy,
+      givens={
+        x: valid_set_x[index * self.batch_size: (index + 1) * self.batch_size],
+        y: valid_set_y[index * self.batch_size: (index + 1) * self.batch_size]
+      }
+    )
+
+    test_accuracy = theano.function(
+      inputs=[index],
+      outputs=accuracy,
+      givens={
+        x: test_set_x[index * self.batch_size: (index + 1) * self.batch_size],
+        y: test_set_y[index * self.batch_size: (index + 1) * self.batch_size]
+      }
+    )
+
     n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
     n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] / batch_size
     n_test_batches = test_set_x.get_value(borrow=True).shape[0] / batch_size
-
-    # valid_predictions = predict(valid_set_x)
-    # valid_accuracy = np.mean(valid_predictions == valid_set_y)
-
-    # test_predictions = predict(test_set_x)
-    # test_accuracy = np.mean(test_predictions == test_set_y)
 
     print('Beginning training!')
 
@@ -160,11 +213,11 @@ class NN():
       for start in xrange(n_train_batches):
         cost = train(start)
 
-      test_predictions = predict(test_set_x.get_value(borrow=True))
-      test_accuracy = np.mean(test_predictions == test_set_y.eval())
+      # total_valid_accuracy = np.mean([valid_accuracy(i) for i in xrange(n_valid_batches)])
+      total_test_accuracy = np.mean([test_accuracy(i) for i in xrange(n_test_batches)])
 
       end_time = time.clock()
-      print('Epoch %d of %d took %.1fs\nTest accuracy: %.2f%%' % ((epoch + 1), n_epochs, (end_time - start_time), (test_accuracy * 100)))
+      print('\nEpoch %d of %d took %.1fs\nTest accuracy: %.2f%%' % ((epoch + 1), n_epochs, (end_time - start_time), (total_test_accuracy * 100)))
 
 
 # Loading data
@@ -206,40 +259,6 @@ def init_weights(shape):
   return theano.shared(floatX(np.random.randn(*shape) * 0.01))
 
 
-# Activations
-
-def linear(x):
-  return x
-
-def sigmoid(x):
-  # T.nnet.sigmoid
-  return 1.0 / (1.0 + T.exp(-x))
-
-def tanh(x):
-  return (T.exp(x) - T.exp(-x)) / (T.exp(x) + T.exp(-x))
-
-def relu(x):
-  return T.maximum(x, 0.0)
-
-def relu_leaky(x, alpha=3.0):
-  return T.maximum(x, x * (1.0 / alpha))
-
-
-# Costs
-
-def ce_multiclass(py_x, y):
-  # Locations 1,2,3,...,n by y
-  # T.nnet.categorical_crossentropy
-  return -T.mean(T.log(py_x)[T.arange(y.shape[0]), y])
-
-def ce_binary(py_x, y):
-  # T.nnet.binary_crossentropy
-  return T.mean(T.nnet.binary_crossentropy(py_x, y))
-
-def mean_squared_error(pred, y):
-  return T.mean((pred - y) ** 2)
-
-
 # Gradient descent
 
 def sgd(cost, params, lr=0.05):
@@ -271,5 +290,3 @@ def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
 
 if __name__ == '__main__':
   NN()
-
-
