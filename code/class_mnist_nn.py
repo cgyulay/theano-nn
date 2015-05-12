@@ -49,9 +49,9 @@ def mean_squared_error(pred, y):
 
 class ConnectedLayer():
 
-  def __init__(self, input, n_in, n_out, rng, activation=relu, p_dropout=0.0, w=None, b=None, input_no_dropout=None):
+  def __init__(self, input, n_in, n_out, rng, activation=relu, p_dropout=0.0, w=None, b=None, input_dropout=None):
     self.input = input
-    self.input_no_dropout = input_no_dropout
+    self.input_dropout = input_dropout
     self.n_in = n_in
     self.n_out = n_out
     self.activation = activation
@@ -66,18 +66,17 @@ class ConnectedLayer():
     self.w = w
     self.b = b
 
-    self.output_no_dropout = activation(T.dot(input_no_dropout, self.w) + self.b)
-
-    self.output = activation(T.dot(dropout(self.input, p_dropout, rng), self.w) + self.b)
-    self.output_no_dropout = activation(T.dot(self.input, self.w) + self.b)
+    self.output = activation(T.dot(input, self.w) + self.b)
+    self.output_dropout = activation(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
+    self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
 
 
 class SoftmaxLayer():
 
-  def __init__(self, input, n_in, n_out, rng, p_dropout=0.0, w=None, b=None, input_no_dropout=None):
+  def __init__(self, input, n_in, n_out, rng, p_dropout=0.0, w=None, b=None, input_dropout=None):
     self.input = input
-    self.input_no_dropout = input_no_dropout
+    self.input_dropout = input_dropout
     self.n_in = n_in
     self.n_out = n_out
     self.p_dropout = p_dropout
@@ -92,19 +91,20 @@ class SoftmaxLayer():
     self.b = b
 
     # self.output = a if uses_dropout else b
-    self.output = softmax(T.dot(dropout(self.input, p_dropout, rng), self.w) + self.b)
-    self.output_no_dropout = softmax(T.dot(self.input, self.w) + self.b)
+    self.output = softmax(T.dot(self.input, self.w) + self.b)
+    self.output_dropout = softmax(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
     self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
 
 
 class NN():
 
-  def __init__(self, lr=0.1, batch_size=100, n_hidden=200, n_epochs=100, dataset='mnist.pkl.gz', regularization='dropout'):
+  def __init__(self, lr=0.5, batch_size=100, n_hidden=200, n_epochs=100, dataset='mnist.pkl.gz', regularization=None, L1_reg=0.01, L2_reg=0.0001):
     self.lr = lr
     self.batch_size = batch_size
     self.n_epochs = n_epochs
     self.dataset = dataset
+    self.regularization = regularization
 
     # Load data and unpack
     datasets = load_data(dataset)
@@ -112,6 +112,12 @@ class NN():
     valid_set_x, valid_set_y = datasets[1]
     test_set_x, test_set_y = datasets[2]
 
+    # Number of minibatches
+    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
+    n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] / batch_size
+    n_test_batches = test_set_x.get_value(borrow=True).shape[0] / batch_size
+
+    # Number of target classes
     classes = set()
     for item in train_set_y.eval():
       classes.add(item)
@@ -123,46 +129,69 @@ class NN():
     y = T.ivector('y')
     rng = np.random.RandomState(1234)
 
-    self.h1 = ConnectedLayer(
+    # Set up dropout regularization if necessary
+    p_dropout_input = 0.0
+    p_dropout_hidden = 0.0
+    if self.regularization == 'dropout':
+      p_dropout_input = 0.2
+      p_dropout_hidden = 0.5
+
+    h1 = ConnectedLayer(
       input=x,
-      input_no_dropout=x,
+      input_dropout=x,
       n_in=28 * 28,
       n_out=n_hidden,
       rng=rng,
       activation=relu,
-      p_dropout=0.2
+      p_dropout=p_dropout_input
     )
 
-    self.h2 = ConnectedLayer(
-      input=self.h1.output,
-      input_no_dropout=self.h1.output_no_dropout,
+    h2 = ConnectedLayer(
+      input=h1.output,
+      input_dropout=h1.output_dropout,
       n_in=n_hidden,
       n_out=n_hidden,
       rng=rng,
       activation=relu,
-      p_dropout=0.5
+      p_dropout=p_dropout_hidden
     )
 
-    self.softmax = SoftmaxLayer(
-      input=self.h2.output,
-      input_no_dropout=self.h2.output_no_dropout,
+    softmax = SoftmaxLayer(
+      input=h2.output,
+      input_dropout=h2.output_dropout,
       n_in=n_hidden,
       n_out=n_output_classes,
       rng=rng,
-      p_dropout=0.5
-    ) # softmax.output = py_x
+      p_dropout=p_dropout_hidden
+    )
 
     # It looks ridiculous but just flattens all layer params into one list
-    self.layers = [self.h1, self.h2, self.softmax]
-    params = [self.layers[i].params for i in xrange(len(self.layers))]
+    self.layers = [h1, h2, softmax]
+    params = [layer.params for layer in self.layers]
     self.params = [param for subparams in params for param in subparams]
 
-    dropped_py_x = self.softmax.output
-    py_x = self.softmax.output_no_dropout
-    y_pred = self.softmax.y_pred
+    # L1 and L2 regularizations
+    L1 = sum([l.w.sum() for l in self.layers])
+    L2 = sum([(l.w**2).sum() for l in self.layers])
+
+    # Construct model
+    output_layer = self.layers[-1]
+    py_x = output_layer.output
+    py_x_dropout = output_layer.output_dropout
+
+    y_pred = output_layer.y_pred
     accuracy = T.mean(T.eq(y_pred, y))
 
-    cost = ce_multiclass(dropped_py_x, y)
+    if self.regularization == 'dropout':
+      cost = ce_multiclass(py_x_dropout, y)
+    elif self.regularization == 'L1':
+      cost = ce_multiclass(py_x + L1_reg * L1, y)
+    elif self.regularization == 'L2':
+      cost = ce_multiclass(py_x + L2_reg * L2, y)
+    else:
+      print('No regularization specified, I hope you know what you\'re doing ;)')
+      cost = ce_multiclass(py_x, y)
+
     updates = sgd(cost, self.params, self.lr)
 
     print('Compiling functions...')
@@ -200,10 +229,6 @@ class NN():
         y: test_set_y[index * self.batch_size: (index + 1) * self.batch_size]
       }
     )
-
-    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_test_batches = test_set_x.get_value(borrow=True).shape[0] / batch_size
 
     print('Beginning training!')
 
@@ -289,4 +314,4 @@ def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
 # Run
 
 if __name__ == '__main__':
-  NN()
+  NN(regularization='dropout')
