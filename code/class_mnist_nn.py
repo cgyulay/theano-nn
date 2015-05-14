@@ -303,6 +303,10 @@ def sgd(cost, params, lr):
     updates.append([p, p - lr * g])
   return updates
 
+# Rmsprop improves learning by maintaining a moving average of the squared gradient
+# for each weight and dividing each weight by this moving average. Basically parameters
+# are modified by their consistency rather than present magnitude (similar to momentum
+# based propagation techniques)
 def rmsprop(cost, params, lr, rho=0.9, epsilon=1e-6):
   grads = T.grad(cost=cost, wrt=params)
   updates = []
