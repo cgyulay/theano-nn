@@ -64,6 +64,7 @@ def rmsprop(cost, params, lr=0.001, rho=0.9, epsilon=1e-6):
     updates.append((p, p - lr * g))
   return updates
 
+
 def sgd(cost, params, lr=0.05):
   grads = T.grad(cost=cost, wrt=params)
   updates = []

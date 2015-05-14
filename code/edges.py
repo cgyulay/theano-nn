@@ -65,7 +65,7 @@ output = T.nnet.sigmoid(conv_out + b.dimshuffle('x', 0, 'x', 'x'))
 # create theano function to compute filtered images
 f = theano.function([input], output, allow_input_downcast=True)
 
-# open random image of dimensions 639x516
+# open random image
 img_path = os.path.join(os.path.split(__file__)[0], "..", "img", 'lamb.jpg')
 
 img = Image.open(open(img_path))

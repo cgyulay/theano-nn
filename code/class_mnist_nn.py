@@ -34,7 +34,7 @@ def relu_leaky(x, alpha=3.0):
 
 def ce_multiclass(py_x, y):
   # Locations 1,2,3,...,n by y
-  # T.nnet.categorical_crossentropy
+  # return T.nnet.categorical_crossentropy(py_x, y)
   return -T.mean(T.log(py_x)[T.arange(y.shape[0]), y])
 
 def ce_binary(py_x, y):
@@ -99,11 +99,12 @@ class SoftmaxLayer():
 
 class NN():
 
-  def __init__(self, lr=0.5, batch_size=100, n_hidden=200, n_epochs=100, dataset='mnist.pkl.gz', regularization=None, L1_reg=0.01, L2_reg=0.0001):
+  def __init__(self, lr=0.5, batch_size=100, n_hidden=200, n_epochs=100, dataset='mnist.pkl.gz', prop='sgd', regularization=None, L1_reg=0.01, L2_reg=0.0001):
     self.lr = lr
     self.batch_size = batch_size
     self.n_epochs = n_epochs
     self.dataset = dataset
+    self.prop = prop
     self.regularization = regularization
 
     # Load data and unpack
@@ -113,9 +114,9 @@ class NN():
     test_set_x, test_set_y = datasets[2]
 
     # Number of minibatches
-    n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_test_batches = test_set_x.get_value(borrow=True).shape[0] / batch_size
+    n_train_batches = len(train_set_x.get_value(borrow=True)) / batch_size
+    n_valid_batches = len(valid_set_x.get_value(borrow=True)) / batch_size
+    n_test_batches = len(test_set_x.get_value(borrow=True)) / batch_size
 
     # Number of target classes
     classes = set()
@@ -176,26 +177,35 @@ class NN():
 
     # Construct model
     output_layer = self.layers[-1]
-    py_x = output_layer.output
+    py_x = output_layer.output # softmax output = P(y|x)
     py_x_dropout = output_layer.output_dropout
 
     y_pred = output_layer.y_pred
     accuracy = T.mean(T.eq(y_pred, y))
 
     if self.regularization == 'dropout':
+      print('Using dropout regularization...')
       cost = ce_multiclass(py_x_dropout, y)
     elif self.regularization == 'L1':
-      cost = ce_multiclass(py_x + L1_reg * L1, y)
+      print('Using L1 regularization...')
+      cost = ce_multiclass(py_x + L1_reg * L1 / n_train_batches, y)
     elif self.regularization == 'L2':
-      cost = ce_multiclass(py_x + L2_reg * L2, y)
+      print('Using L2 regularization...')
+      cost = ce_multiclass(py_x + L2_reg * L2 / n_train_batches, y)
     else:
       print('No regularization specified, I hope you know what you\'re doing ;)')
       cost = ce_multiclass(py_x, y)
 
-    updates = sgd(cost, self.params, self.lr)
+    if self.prop == 'sgd':
+      updates = sgd(cost, self.params, self.lr)
+    elif self.prop == 'rms':
+      updates = rmsprop(cost, self.params, self.lr)
+    else:
+      raise IOError('Unrecognized propagation technique specified, bailing out.')
 
     print('Compiling functions...')
 
+    # Use givens to specify numeric minibatch from symbolic x and y
     index = T.lscalar()
     train = theano.function(
       inputs=[index],
@@ -205,11 +215,6 @@ class NN():
         x: train_set_x[index * self.batch_size: (index + 1) * self.batch_size],
         y: train_set_y[index * self.batch_size: (index + 1) * self.batch_size]
       }
-    )
-
-    predict = theano.function(
-      inputs=[x],
-      outputs=y_pred
     )
 
     valid_accuracy = theano.function(
@@ -228,6 +233,11 @@ class NN():
         x: test_set_x[index * self.batch_size: (index + 1) * self.batch_size],
         y: test_set_y[index * self.batch_size: (index + 1) * self.batch_size]
       }
+    )
+
+    predict = theano.function(
+      inputs=[x],
+      outputs=y_pred
     )
 
     print('Beginning training!')
@@ -250,7 +260,7 @@ class NN():
 def load_data(dataset):
   print('Loading the data...')
 
-  # load gzip from data folder with name dataset
+  # Load gzip from data folder with name dataset
   dataset = os.path.join(os.path.split(__file__)[0], "..", "data", dataset)
   f = gzip.open(dataset, 'rb')
   train_set, valid_set, test_set = cPickle.load(f)
@@ -286,15 +296,27 @@ def init_weights(shape):
 
 # Gradient descent
 
-def sgd(cost, params, lr=0.05):
+def sgd(cost, params, lr):
   grads = T.grad(cost=cost, wrt=params)
   updates = []
   for p, g in zip(params, grads):
-    updates.append([p, p - g * lr])
+    updates.append([p, p - lr * g])
+  return updates
+
+def rmsprop(cost, params, lr, rho=0.9, epsilon=1e-6):
+  grads = T.grad(cost=cost, wrt=params)
+  updates = []
+  for p, g in zip(params, grads):
+    acc = theano.shared(p.get_value() * 0.0)
+    acc_new = rho * acc + (1 - rho) * g ** 2
+    gradient_scaling = T.sqrt(acc_new + epsilon)
+    g = g / gradient_scaling
+    updates.append((acc, acc_new))
+    updates.append((p, p - lr * g))
   return updates
 
 
-# Layers
+# Special layers
 
 def softmax(x):
   # T.nnet.softmax
@@ -305,7 +327,7 @@ def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
   srng = theano.tensor.shared_randomstreams.RandomStreams(rng.randint(999999))
 
   if p > 0:
-    p = 1 - p # 1 - p because p = prob of dropping
+    p = 1 - p # 1 - p because p = probability of dropping
     x *= srng.binomial(x.shape, p=p, dtype=theano.config.floatX)
     x /= p
   return x
@@ -314,4 +336,7 @@ def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
 # Run
 
 if __name__ == '__main__':
-  NN(regularization='dropout')
+  # NN(lr=0.5, prop='sgd', regularization='dropout')
+  NN(lr=0.001, prop='rms', regularization='dropout')
+
+
