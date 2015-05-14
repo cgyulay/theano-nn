@@ -9,7 +9,7 @@ import numpy as np
 from theano import config
 
 config.mode='FAST_COMPILE'
-
+config.floatX='float32'
 
 # Activations
 
@@ -67,14 +67,14 @@ class ConnectedLayer():
     self.b = b
 
     self.output = activation(T.dot(input, self.w) + self.b)
-    self.output_dropout = activation(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
+    if input_dropout != None: self.output_dropout = activation(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
     self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
 
 
 class SoftmaxLayer():
 
-  def __init__(self, input, n_in, n_out, rng, p_dropout=0.0, w=None, b=None, input_dropout=None):
+  def __init__(self, input, n_in, n_out, rng=np.random.RandomState(1234), p_dropout=0.0, w=None, b=None, input_dropout=None):
     self.input = input
     self.input_dropout = input_dropout
     self.n_in = n_in
@@ -92,7 +92,7 @@ class SoftmaxLayer():
 
     # self.output = a if uses_dropout else b
     self.output = softmax(T.dot(self.input, self.w) + self.b)
-    self.output_dropout = softmax(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
+    if input_dropout != None: self.output_dropout = softmax(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
     self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
 
@@ -188,10 +188,10 @@ class NN():
       cost = ce_multiclass(py_x_dropout, y)
     elif self.regularization == 'L1':
       print('Using L1 regularization...')
-      cost = ce_multiclass(py_x + L1_reg * L1 / n_train_batches, y)
+      cost = ce_multiclass(py_x + L1_reg * L1, y)
     elif self.regularization == 'L2':
       print('Using L2 regularization...')
-      cost = ce_multiclass(py_x + L2_reg * L2 / n_train_batches, y)
+      cost = ce_multiclass(py_x + L2_reg * L2, y)
     else:
       print('No regularization specified, I hope you know what you\'re doing ;)')
       cost = ce_multiclass(py_x, y)
@@ -328,10 +328,13 @@ def softmax(x):
   return e_x / e_x.sum(axis=1).dimshuffle(0, 'x')
 
 def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
+  # Binomial distribution
   srng = theano.tensor.shared_randomstreams.RandomStreams(rng.randint(999999))
 
   if p > 0:
     p = 1 - p # 1 - p because p = probability of dropping
+
+    # Create distribution with p successes over x.shape experiments
     x *= srng.binomial(x.shape, p=p, dtype=theano.config.floatX)
     x /= p
   return x
@@ -340,7 +343,7 @@ def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
 # Run
 
 if __name__ == '__main__':
-  # NN(lr=0.5, prop='sgd', regularization='dropout')
-  NN(lr=0.001, prop='rms', regularization='dropout')
+  # NN(lr=0.5, prop='rms', regularization='L2')
+  NN(lr=0.001, prop='rms', regularization='none')
 
 
