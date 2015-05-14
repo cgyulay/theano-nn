@@ -311,11 +311,13 @@ def rmsprop(cost, params, lr, rho=0.9, epsilon=1e-6):
   grads = T.grad(cost=cost, wrt=params)
   updates = []
   for p, g in zip(params, grads):
-    acc = theano.shared(p.get_value() * 0.0)
-    acc_new = rho * acc + (1 - rho) * g ** 2
-    gradient_scaling = T.sqrt(acc_new + epsilon)
-    g = g / gradient_scaling
-    updates.append((acc, acc_new))
+    mean_square = theano.shared(p.get_value() * 0.0)
+
+    mean_square_new = rho * mean_square + (1 - rho) * g ** 2
+    g_scale = T.sqrt(mean_square_new + epsilon)
+    g = g / g_scale
+
+    updates.append((mean_square, mean_square_new))
     updates.append((p, p - lr * g))
   return updates
 
@@ -329,7 +331,7 @@ def softmax(x):
 
 def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
   # Binomial distribution
-  srng = theano.tensor.shared_randomstreams.RandomStreams(rng.randint(999999))
+  srng = theano.tensor.shared_randomstreams.RandomStreams(rng.randint(4321))
 
   if p > 0:
     p = 1 - p # 1 - p because p = probability of dropping
@@ -344,6 +346,6 @@ def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
 
 if __name__ == '__main__':
   # NN(lr=0.5, prop='rms', regularization='L2')
-  NN(lr=0.001, prop='rms', regularization='none')
+  NN(lr=0.001, prop='rms', regularization='dropout')
 
 
