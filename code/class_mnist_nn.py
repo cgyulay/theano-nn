@@ -66,7 +66,7 @@ class ConnectedLayer():
     self.w = w
     self.b = b
 
-    self.output = activation(T.dot(input, self.w) + self.b)
+    self.output = activation((1 - self.p_dropout) * T.dot(input, self.w) + self.b)
     if input_dropout != None: self.output_dropout = activation(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
     self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
@@ -91,7 +91,7 @@ class SoftmaxLayer():
     self.b = b
 
     # self.output = a if uses_dropout else b
-    self.output = softmax(T.dot(self.input, self.w) + self.b)
+    self.output = softmax((1 - self.p_dropout) * T.dot(self.input, self.w) + self.b)
     if input_dropout != None: self.output_dropout = softmax(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
     self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
