@@ -41,7 +41,7 @@ def ce_binary(py_x, y):
   # T.nnet.binary_crossentropy
   return T.mean(T.nnet.binary_crossentropy(py_x, y))
 
-def mean_squared_error(pred, y):
+def mse(pred, y):
   return T.mean((pred - y) ** 2)
 
 
@@ -51,7 +51,6 @@ class ConnectedLayer():
 
   def __init__(self, input, n_in, n_out, rng, activation=relu, p_dropout=0.0, w=None, b=None, input_dropout=None):
     self.input = input
-    self.input_dropout = input_dropout
     self.n_in = n_in
     self.n_out = n_out
     self.activation = activation
@@ -66,8 +65,11 @@ class ConnectedLayer():
     self.w = w
     self.b = b
 
+    if input_dropout != None:
+      self.input_dropout = dropout(input_dropout, p_dropout, rng)
+      self.output_dropout = activation(T.dot(input_dropout, self.w) + self.b)
+
     self.output = activation((1 - self.p_dropout) * T.dot(input, self.w) + self.b)
-    if input_dropout != None: self.output_dropout = activation(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
     self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
 
@@ -76,7 +78,6 @@ class SoftmaxLayer():
 
   def __init__(self, input, n_in, n_out, rng=np.random.RandomState(1234), p_dropout=0.0, w=None, b=None, input_dropout=None):
     self.input = input
-    self.input_dropout = input_dropout
     self.n_in = n_in
     self.n_out = n_out
     self.p_dropout = p_dropout
@@ -90,9 +91,11 @@ class SoftmaxLayer():
     self.w = w
     self.b = b
 
-    # self.output = a if uses_dropout else b
+    if input_dropout != None:
+      self.input_dropout = dropout(input_dropout, p_dropout, rng)
+      self.output_dropout = softmax(T.dot(input_dropout, self.w) + self.b)
+
     self.output = softmax((1 - self.p_dropout) * T.dot(self.input, self.w) + self.b)
-    if input_dropout != None: self.output_dropout = softmax(T.dot(dropout(self.input_dropout, p_dropout, rng), self.w) + self.b)
     self.y_pred = T.argmax(self.output, axis=1)
     self.params = [self.w, self.b]
 
@@ -198,6 +201,8 @@ class NN():
 
     if self.prop == 'sgd':
       updates = sgd(cost, self.params, self.lr)
+    elif self.prop == 'mom':
+      updates = sgd_momentum(cost, self.params, self.lr)
     elif self.prop == 'rms':
       updates = rmsprop(cost, self.params, self.lr)
     else:
@@ -252,7 +257,7 @@ class NN():
       total_test_accuracy = np.mean([test_accuracy(i) for i in xrange(n_test_batches)])
 
       end_time = time.clock()
-      print('\nEpoch %d of %d took %.1fs\nTest accuracy: %.2f%%' % ((epoch + 1), n_epochs, (end_time - start_time), (total_test_accuracy * 100)))
+      print('\nEpoch %d of %d took %.1s\fnTest accuracy: %.2f%%' % ((epoch + 1), n_epochs, (end_time - start_time), (total_test_accuracy * 100)))
 
 
 # Loading data
@@ -265,7 +270,7 @@ def load_data(dataset):
   f = gzip.open(dataset, 'rb')
   train_set, valid_set, test_set = cPickle.load(f)
   f.close()
-  # train_set, valid_set, test_set format: tuple(input, target)
+  # train_set, valid_set, test_set format: (input, target)
   # input is a 2d (matrix) np.ndarray whose rows correspond to an example
   # target is a 1d (vector) np.ndarray that has the same length as the number of rows in the input
 
@@ -303,10 +308,24 @@ def sgd(cost, params, lr):
     updates.append([p, p - lr * g])
   return updates
 
-# Rmsprop improves learning by maintaining a moving average of the squared gradient
-# for each weight and dividing each weight by this moving average. Basically parameters
-# are modified by their consistency rather than present magnitude (similar to momentum
+def sgd_momentum(cost, params, lr, mu=0.9):
+  grads = T.grad(cost=cost, wrt=params)
+  updates = []
+  for p, g in zip(params, grads):
+    v = theano.shared(p.get_value() * 0.0)
+    v_new = mu * v - lr * g
+
+    updates.append((v, v_new))
+    updates.append((p, p + v_new))
+
+# Rmsprop improves learning by maintaining a moving average of the squared gradient for
+# each weight and dividing each weight by this moving average. Basically parameters are
+# modified by their consistency rather than present magnitude (similar to momentum-
 # based propagation techniques)
+#
+# 1 - rho represents leakiness (how much we're trying to preserve or discard previous
+# moving average). Epsilon is a small smoothing constant, mostly present to avoid
+# division by zero
 def rmsprop(cost, params, lr, rho=0.9, epsilon=1e-6):
   grads = T.grad(cost=cost, wrt=params)
   updates = []
@@ -345,7 +364,7 @@ def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
 # Run
 
 if __name__ == '__main__':
-  # NN(lr=0.5, prop='rms', regularization='L2')
-  NN(lr=0.001, prop='rms', regularization='dropout')
+  # NN(lr=0.5, prop='mom', regularization='L2')
+  NN(lr=0.001, prop='rms', regularization='L2')
 
 
