@@ -102,7 +102,7 @@ class SoftmaxLayer():
 
 class NN():
 
-  def __init__(self, lr=0.5, batch_size=100, n_hidden=200, n_epochs=100, dataset='mnist.pkl.gz', prop='sgd', regularization=None, L1_reg=0.01, L2_reg=0.0001):
+  def __init__(self, lr=0.5, batch_size=100, n_hidden=1000, n_epochs=100, dataset='mnist.pkl.gz', prop='sgd', regularization=None, L1_reg=0.01, L2_reg=0.0001):
     self.lr = lr
     self.batch_size = batch_size
     self.n_epochs = n_epochs
@@ -257,7 +257,7 @@ class NN():
       total_test_accuracy = np.mean([test_accuracy(i) for i in xrange(n_test_batches)])
 
       end_time = time.clock()
-      print('\nEpoch %d of %d took %.1s\fnTest accuracy: %.2f%%' % ((epoch + 1), n_epochs, (end_time - start_time), (total_test_accuracy * 100)))
+      print('\nEpoch %d of %d took %.1fs\nTest accuracy: %.2f%%' % ((epoch + 1), n_epochs, (end_time - start_time), (total_test_accuracy * 100)))
 
 
 # Loading data
@@ -365,6 +365,6 @@ def dropout(x, p=0.0, rng=np.random.RandomState(1234)):
 
 if __name__ == '__main__':
   # NN(lr=0.5, prop='mom', regularization='L2')
-  NN(lr=0.001, prop='rms', regularization='L2')
+  NN(lr=0.001, prop='rms', regularization='dropout', n_epochs=30)
 
 
